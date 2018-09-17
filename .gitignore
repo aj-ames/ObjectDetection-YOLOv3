@@ -1,0 +1,7 @@
+# pycache
+__pycache__
+
+# Model Files
+model_data/yolov3.cfg
+model_data/yolov3.weights
+model_data/yolov3.h5
