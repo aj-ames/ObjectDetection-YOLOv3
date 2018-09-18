@@ -16,8 +16,45 @@ from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
 from yolo3.utils import letterbox_image
 from keras.utils import multi_gpu_model
 import cv2
+from queue import Queue
+from threading import Thread
+import argparse
+
+class Iris:
+    # Variables in Class scope
+    args = None
+    in_queue = None
+    out_queue = None
+    buf_queue = None
+    vid = None
+
+    def argsparser(self):
+        ''' argsparser() adds argument functionality for command line. '''
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--source', dest='source', type=str,
+                            default=0, help='Device index of the camera.')
+        parser.add_argument('--threads', dest='threads', type=int,
+                            default=1, help='Number of Threads to utilize.')
+        return parser.parse_args()
+
+    def __init__(self):
+        self.args = self.argsparser()
+
+        self.vid = cv2.VideoCapture(0) # For WebCam
+        # self.vid = cv2.VideoCapture('compliance.mp4') # For WebCam
+        # self.vid = cv2.VideoCapture('rtsp://admin:astr1x2096@192.168.0.2/1') # For IPCamera
+        cv2.namedWindow("Object Detection", cv2.WND_PROP_FULLSCREEN)
+        cv2.setWindowProperty("Object Detection", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+        # Queueing is used to dramaticallty improve framerates
+        # Queue for Object Detection
+        self.in_queue = Queue(5)
+        # fps is better if queue is higher but then more lags
+        self.out_queue = Queue()
+        self.buf_queue = Queue()
 
 class YOLO:
+
     _defaults = {
         "model_path": 'model_data/yolov3.h5',
         "anchors_path": 'model_data/yolo_anchors.txt',
@@ -25,7 +62,7 @@ class YOLO:
         "score" : 0.5,
         "iou" : 0.45,
         "model_image_size" : (416, 416),
-        "gpu_num" : 0,
+        "gpu_num" :     0,
     }
 
     @classmethod
@@ -158,37 +195,37 @@ class YOLO:
         return image
     
     def detect_video(self):
-        vid = cv2.VideoCapture(0)
-        if not vid.isOpened():
-            raise IOError("Couldn't open webcam or video")
+        global iris
+
         accum_time = 0
         curr_fps = 0
         fps = "FPS: ??"
         prev_time = timer()
+
         while True:
-            ret, frame = vid.read()
-            image = Image.fromarray(frame)
-            image = self.detect_image(image)
-            result = np.asarray(image)
-            curr_time = timer()
-            exec_time = curr_time - prev_time
-            prev_time = curr_time
-            accum_time = accum_time + exec_time
-            curr_fps = curr_fps + 1
-            if accum_time > 1:
-                accum_time = accum_time - 1
-                fps = "FPS: " + str(curr_fps)
-                curr_fps = 0
-            cv2.putText(result, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=0.50, color=(255, 0, 0), thickness=2)
-            cv2.imshow("Object Detection", result)
+            ret, frame = iris.vid.read()
+            if ret:
+                image = Image.fromarray(frame)
+                image = self.detect_image(image)
+                result = np.asarray(image)
+                curr_time = timer()
+                exec_time = curr_time - prev_time
+                prev_time = curr_time
+                accum_time = accum_time + exec_time
+                curr_fps = curr_fps + 1
+                if accum_time > 1:
+                    accum_time = accum_time - 1
+                    fps = "FPS: " + str(curr_fps)
+                    curr_fps = 0
+                cv2.putText(result, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=0.50, color=(255, 0, 0), thickness=2)
+                cv2.imshow("Object Detection", result)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
-        yolo.close_session()
-
-    def close_session(self):
+        iris.vid.release()
+        cv2.destroyAllWindows()
         self.sess.close()
 
     def __init__(self, **kwargs):
@@ -198,9 +235,7 @@ class YOLO:
         self.anchors = self._get_anchors()
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate()
-        cv2.namedWindow("Object Detection", cv2.WND_PROP_FULLSCREEN)
-        cv2.setWindowProperty("Object Detection", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
+iris = Iris()
 yolo = YOLO()
-
 yolo.detect_video()
